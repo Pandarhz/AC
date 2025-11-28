@@ -3,18 +3,19 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Expédition Écrins - Mode Aventure</title>
+    <title>Souvenirs des Écrins</title>
     
     <!-- Leaflet CSS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <!-- Font Awesome (pour les personnages) -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <!-- Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;800&family=Orbitron:wght@700&display=swap" rel="stylesheet">
 
     <style>
         :root {
             --primary-color: #000000;
-            --accent-color: #ff4500; /* Orange vif type HUD de jeu */
-            --text-light: #ffffff;
+            --accent-color: #ff4500;
         }
 
         body, html {
@@ -27,7 +28,7 @@
             background-color: #1a1a1a;
         }
 
-        /* --- 1. L'ECRAN D'INTRO (Cinématique) --- */
+        /* --- 1. INTRO ANIMATION (Marcheurs) --- */
         #intro-screen {
             position: fixed;
             top: 0;
@@ -35,238 +36,258 @@
             width: 100%;
             height: 100%;
             background-color: #000;
-            z-index: 1000;
+            z-index: 2000;
             display: flex;
             align-items: center;
             justify-content: center;
-            overflow: hidden;
-            /* Animation de disparition de l'écran noir */
-            animation: fadeOutScreen 1s ease-out 4s forwards;
+            animation: fadeOutIntro 1s ease-out 4s forwards; /* Disparait après 4s */
             pointer-events: none;
         }
 
-        /* Effet "Letterbox" (Bandes noires cinéma) */
-        #intro-screen::before, #intro-screen::after {
-            content: '';
+        .walkers-container {
             position: absolute;
+            bottom: 40%;
+            left: -20%; /* Départ à gauche hors écran */
+            display: flex;
+            gap: 20px;
+            animation: walkAcross 4s linear forwards;
+        }
+
+        .walker {
+            font-size: 3rem;
+            color: white;
+            filter: drop-shadow(0 0 10px rgba(255, 255, 255, 0.5));
+        }
+
+        /* Animation de sautillement pour simuler la marche */
+        .walker i {
+            animation: bounce 0.5s infinite alternate ease-in-out;
+        }
+        .walker:nth-child(2) i { animation-delay: 0.1s; }
+        .walker:nth-child(3) i { animation-delay: 0.2s; }
+
+        /* --- 2. DIAPORAMA (Overlay) --- */
+        #slideshow-overlay {
+            position: fixed;
+            top: 0;
             left: 0;
             width: 100%;
-            height: 10%;
-            background: black;
-            z-index: 1002;
-            border-bottom: 2px solid var(--accent-color);
-        }
-        #intro-screen::before { top: 0; }
-        #intro-screen::after { bottom: 0; border-bottom: none; border-top: 2px solid var(--accent-color); }
-
-        /* Le conteneur du randonneur réaliste */
-        .hiker-cinematic {
-            position: absolute;
-            bottom: 15%; 
-            left: -300px; /* Départ hors écran */
-            width: 250px;
-            height: 350px;
-            /* Image réaliste de randonnée détourée (illusion) ou card */
-            background-image: url('https://images.unsplash.com/photo-1551632811-561732d1e306?q=80&w=800&auto=format&fit=crop');
-            background-size: cover;
-            background-position: center;
-            box-shadow: 0 0 20px rgba(255, 69, 0, 0.5); /* Lueur orange */
-            border-radius: 10px;
-            transform: skewX(-10deg); /* Effet de vitesse/dynamique */
-            z-index: 1001;
-            
-            /* L'animation de traversée */
-            animation: traverseScreen 3.5s cubic-bezier(0.45, 0, 0.55, 1) forwards;
+            height: 100%;
+            background-color: black;
+            z-index: 3000;
+            display: none; /* Caché par défaut */
+            align-items: center;
+            justify-content: center;
         }
 
-        /* Texte HUD "Chargement" */
-        .hud-text {
-            position: absolute;
-            bottom: 12%;
-            right: 20px;
-            font-family: 'Orbitron', sans-serif; /* Police Sci-fi/Jeu */
-            color: var(--accent-color);
-            font-size: 0.8rem;
-            letter-spacing: 2px;
-            text-transform: uppercase;
-            z-index: 1003;
-            animation: blink 1s infinite;
+        #slideshow-img {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+            animation: popIn 0.3s ease-out; /* Effet d'apparition sec */
         }
 
-        /* --- 2. LA CARTE ET L'INTERFACE --- */
+        /* --- 3. CARTE ET INTERFACE --- */
         #map {
             height: 100%;
             width: 100%;
             position: absolute;
             z-index: 1;
-            opacity: 0; /* Caché au début */
-            animation: fadeInMap 2s ease-out 3.5s forwards; /* Apparaît après la cinématique */
         }
 
         .ui-container {
             position: absolute;
-            top: 40px;
-            left: 0;
+            bottom: 50px;
             width: 100%;
             text-align: center;
-            z-index: 10;
-            pointer-events: none;
+            z-index: 1000;
             opacity: 0;
-            animation: fadeInUI 1s ease-out 5s forwards;
+            /* Apparait après l'intro et le zoom (env 8s) */
+            animation: fadeInUI 1s ease-out 8s forwards; 
+            pointer-events: none; /* Pour cliquer au travers si besoin */
         }
 
-        h1 {
-            font-family: 'Orbitron', sans-serif;
-            font-size: 2.5rem;
-            margin: 0;
-            color: white;
-            text-shadow: 0 0 10px black;
-            text-transform: uppercase;
-        }
-
-        .coords-display {
-            background: rgba(0,0,0,0.7);
-            color: var(--accent-color);
-            padding: 5px 10px;
-            border-radius: 5px;
-            font-family: monospace;
-            display: inline-block;
-            margin-top: 10px;
-            font-size: 0.8rem;
-        }
-
-        /* Bouton Noir demandé */
+        /* Bouton Noir */
         .start-btn {
-            position: absolute;
-            bottom: 50px;
-            left: 50%;
-            transform: translateX(-50%);
-            z-index: 10;
-            background-color: #000000; /* NOIR */
+            background-color: #000000;
             color: white;
-            padding: 18px 40px;
-            border-radius: 5px; /* Coins un peu plus carrés style militaire/tech */
+            padding: 20px 40px;
+            border-radius: 50px;
             text-decoration: none;
             font-weight: 800;
             font-family: 'Orbitron', sans-serif;
             text-transform: uppercase;
-            letter-spacing: 2px;
-            box-shadow: 0 10px 20px rgba(0,0,0,0.5);
-            border: 1px solid #333;
+            letter-spacing: 1px;
+            box-shadow: 0 5px 15px rgba(0,0,0,0.5);
+            border: 2px solid white;
             pointer-events: auto;
-            opacity: 0;
-            animation: fadeInUI 1s ease-out 5.5s forwards;
-            transition: all 0.3s;
+            cursor: pointer;
+            display: inline-block;
+            transition: transform 0.1s;
         }
-
+        
         .start-btn:active {
-            transform: translateX(-50%) scale(0.95);
-            background-color: #222;
+            transform: scale(0.95);
         }
 
         /* --- KEYFRAMES --- */
-        @keyframes traverseScreen {
-            0% { left: -300px; opacity: 0; transform: skewX(-10deg) scale(0.8); }
-            10% { opacity: 1; }
-            80% { opacity: 1; }
-            100% { left: 100%; opacity: 0; transform: skewX(-10deg) scale(1); }
+        @keyframes walkAcross {
+            0% { left: -20%; }
+            100% { left: 120%; } /* Sort à droite */
         }
 
-        @keyframes fadeOutScreen {
-            0% { opacity: 1; pointer-events: auto;}
-            100% { opacity: 0; pointer-events: none; visibility: hidden;}
+        @keyframes bounce {
+            0% { transform: translateY(0); }
+            100% { transform: translateY(-10px); }
         }
 
-        @keyframes fadeInMap {
-            to { opacity: 1; }
+        @keyframes fadeOutIntro {
+            to { opacity: 0; visibility: hidden; }
         }
 
         @keyframes fadeInUI {
             to { opacity: 1; }
         }
 
-        @keyframes blink {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
+        @keyframes popIn {
+            0% { transform: scale(0.9); opacity: 0.5; }
+            100% { transform: scale(1); opacity: 1; }
         }
+
     </style>
 </head>
 <body>
 
-    <!-- Intro Cinématique -->
+    <!-- 1. Intro Animation -->
     <div id="intro-screen">
-        <div class="hiker-cinematic"></div>
-        <div class="hud-text">Chargement des données topographiques...</div>
+        <div class="walkers-container">
+            <!-- 3 personnages -->
+            <div class="walker"><i class="fa-solid fa-person-hiking"></i></div>
+            <div class="walker"><i class="fa-solid fa-person-skiing"></i></div>
+            <div class="walker"><i class="fa-solid fa-person-snowboarding"></i></div>
+        </div>
     </div>
 
-    <!-- Interface Finale -->
-    <div class="ui-container">
-        <h1>Zone Écrins</h1>
-        <div class="coords-display">TARGET: 44°57'10.8"N 6°05'50.8"E</div>
+    <!-- 2. Diaporama Rapide -->
+    <div id="slideshow-overlay">
+        <img id="slideshow-img" src="" alt="Souvenir">
     </div>
 
-    <a href="#" class="start-btn" onclick="startExplore()">Lancer l'exploration</a>
+    <!-- 3. Interface Bouton -->
+    <div class="ui-container" id="ui-layer">
+        <a class="start-btn" onclick="launchSlideshow()">Lancer l'exploration</a>
+    </div>
 
+    <!-- 4. Carte -->
     <div id="map"></div>
 
     <!-- Leaflet JS -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
         // --- CONFIGURATION ---
-        // Coordonnées de départ (Vue d'ensemble)
-        const startCoords = [44.90, 6.30]; 
-        // Coordonnées Cibles (Lac Besson / Alpe d'Huez)
-        // Conversion DMS: 44°57'10.8"N -> 44.9530 | 6°05'50.8"E -> 6.0974
+        // Liste de tes photos (assure-toi qu'elles sont dans le dossier avec index.html)
+        // Renomme tes photos 1.jpg, 2.jpg... pour faciliter la vie !
+        // J'ai mis des placeholders Unsplash pour l'exemple, REMPLACE LES NOMS ci-dessous par tes fichiers.
+        const myPhotos = [
+            '1.jpg', '2.jpg', '3.jpg', '4.jpg', '5.jpg', 
+            '6.jpg', '7.jpg', '8.jpg', '9.jpg', '10.jpg'
+            // Ajoute autant de photos que tu veux ici
+        ];
+
+        // Si tu n'as pas encore mis tes photos locales, ce code utilise des images démo :
+        const demoPhotos = [
+           'https://images.unsplash.com/photo-1519681393784-d120267933ba',
+           'https://images.unsplash.com/photo-1454496522488-7a8e488e8606',
+           'https://images.unsplash.com/photo-1486870591958-9b9d0d1dda99',
+           'https://images.unsplash.com/photo-1551632811-561732d1e306',
+           'https://images.unsplash.com/photo-1605542058732-22f35492d192'
+        ];
+        
+        // IMPORTANT : Change cette variable sur 'true' quand tu as mis tes vraies photos
+        const useLocalPhotos = false; 
+
+        const photosToUse = useLocalPhotos ? myPhotos : demoPhotos;
+
+        // Coordonnées Cibles (Lac Besson)
         const targetCoords = [44.9530, 6.0974]; 
 
-        // 1. Init Map
+        // 1. Initialisation Carte (Vue Espace - Zoom Lointain)
         const map = L.map('map', {
-            center: startCoords,
-            zoom: 11,
+            center: [46.2276, 2.2137], // Centre de la France
+            zoom: 5, // Vue de très haut
             zoomControl: false,
             attributionControl: false
         });
 
-        // 2. Fond de carte Aventure (OpenTopoMap)
+        // Fond de carte Topographique
         L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
             maxZoom: 17,
             attribution: 'OpenTopoMap'
         }).addTo(map);
 
-        // 3. Marqueur sur la cible (Optionnel, style aventure)
-        const targetIcon = L.divIcon({
-            className: 'custom-pin',
-            html: '<i class="fas fa-map-marker-alt" style="color:red; font-size:24px;"></i>',
-            iconSize: [30, 42],
-            iconAnchor: [15, 42]
-        });
-
-        // 4. Logique d'animation "FlyTo"
-        // On attend que l'intro "Cinématique" soit finie (env 4 secondes)
+        // 2. Gestion de l'arrivée (Zoom depuis l'espace)
+        // L'intro dure 4s, on attend la fin pour lancer le zoom
         setTimeout(() => {
-            // Lancement du vol vers les coordonnées cibles
-            map.flyTo(targetCoords, 15, {
+            map.flyTo(targetCoords, 14, {
                 animate: true,
-                duration: 5 // Vol lent et panoramique de 5 secondes
+                duration: 4 // Le vol dure 4 secondes
             });
             
-            // Ajouter un marqueur à l'arrivée
+            // Une fois arrivé, on met un marqueur
             setTimeout(() => {
                 L.marker(targetCoords).addTo(map)
-                .bindPopup("<b>Point d'arrivée</b><br>44°57'10.8\"N 6°05'50.8\"E").openPopup();
-            }, 5000);
+                .bindPopup("<b>Notre Spot</b><br>Lac Besson").openPopup();
+            }, 4500);
 
-        }, 4000); // 4000ms correspond à la fin de l'intro CSS
+        }, 4000);
 
-        // Fonction interaction bouton
-        function startExplore() {
-            // Nettoyage UI pour immersion totale
-            document.querySelector('.ui-container').style.opacity = '0';
-            document.querySelector('.start-btn').style.opacity = '0';
+        // 3. Fonction Diaporama Rapide
+        function launchSlideshow() {
+            const ui = document.getElementById('ui-layer');
+            const overlay = document.getElementById('slideshow-overlay');
+            const imgElement = document.getElementById('slideshow-img');
             
-            // Réactive le zoom
+            // Cacher le bouton
+            ui.style.opacity = '0';
+            
+            // Afficher l'overlay
+            overlay.style.display = 'flex';
+            
+            let index = 0;
+
+            // Fonction pour changer d'image
+            function showNextImage() {
+                if (index >= photosToUse.length) {
+                    // Fin du diaporama
+                    endSlideshow();
+                    return;
+                }
+
+                imgElement.src = photosToUse[index];
+                
+                // Effet de "reset" de l'animation pour chaque image
+                imgElement.style.animation = 'none';
+                imgElement.offsetHeight; /* trigger reflow */
+                imgElement.style.animation = 'popIn 0.3s ease-out';
+
+                index++;
+                
+                // Temps d'affichage par photo (800ms = 0.8 seconde)
+                setTimeout(showNextImage, 800); 
+            }
+
+            // Lancer la première image
+            showNextImage();
+        }
+
+        function endSlideshow() {
+            const overlay = document.getElementById('slideshow-overlay');
+            overlay.style.display = 'none';
+            
+            // Réactiver les contrôles de zoom pour l'utilisateur
             L.control.zoom({ position: 'bottomright' }).addTo(map);
         }
+
     </script>
 </body>
 </html>
