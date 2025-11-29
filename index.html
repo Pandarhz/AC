@@ -181,6 +181,9 @@
     <!-- 4. Carte -->
     <div id="map"></div>
 
+    <!-- Audio background -->
+    <audio id="bg-audio" src="./Jump (Instrumental) - Van Halen.m4a" preload="auto" loop></audio>
+
     <!-- Leaflet JS -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
@@ -189,15 +192,24 @@
         // Renomme tes photos 1.jpg, 2.jpg... pour faciliter la vie !
         // J'ai mis des placeholders Unsplash pour l'exemple, REMPLACE LES NOMS ci-dessous par tes fichiers.
         const myPhotos = [
-            '1.jpg', '10.JPG', '11.JPG', '12.png', '13.JPG',
-            '14.JPG', '15.JPG', '16.JPG', '17.JPG', '18.JPG',
-            '19.JPG', '2.JPG', '20.png', '21.JPG', '22.JPG',
-            '23.jpg', '24.jpg', '25.JPG', '26.PNG', '27.jpg',
-            '28.png', '29.jpg', '3.JPG', '30.JPG', '31.JPG',
-            '32.JPG', '33.jpg', '34.JPG', '35.png', '36.JPG',
-            '37.jpg', '38.JPG', '39.png', '4.JPG', '40.JPG',
-            '41.JPG', '42.JPG', '5.JPG', '6.JPG', '7.jpg',
-            '8.jpg', '9.jpg'
+            '1.jpg', '2.jpeg', '3.jpeg', '4.jpeg', '5.jpeg',
+            '6.png', '7.png', '8.png', '9.png', '10.png',
+            '11.JPG', '12.JPG', '13.JPG', '14.JPG', '15.JPG',
+            '16.JPG', '17.JPG', '18.jpeg', '19.jpg', '20.jpg',
+            '21.JPG', '22.JPG', '23.JPG', '24.JPG', '25.jpeg',
+            '26.JPG', '27.JPG', '28.JPG', '29.JPG', '30.JPG',
+            '31.JPG', '32.jpeg', '33.jpg', '34.jpeg', '35.jpeg',
+            '36.jpeg', '37.jpg', '38.jpeg', '39.jpeg', '40.jpeg',
+            '41.JPG', '42.jpeg', '43.PNG', '44.jpg', '45.jpg',
+            '46.jpeg', '47.jpeg', '48.jpeg', '49.JPG', '50.JPG',
+            '51.jpeg', '52.jpeg', '53.jpeg', '54.jpg', '55.JPG',
+            '56.jpeg', '57.jpeg', '58.jpeg', '59.jpeg', '60.jpeg',
+            '61.jpeg', '62.jpeg', '63.jpeg', '64.jpeg', '65.jpeg',
+            '66.jpeg', '67.jpeg', '68.JPG', '69.jpeg', '70.jpeg',
+            '71.jpeg', '72.jpeg', '73.jpeg', '74.png', '75.jpeg',
+            '76.jpg', '77.jpeg', '78.jpeg', '79.jpeg', '80.jpeg',
+            '81.jpeg', '82.jpeg', '83.jpeg', '84.jpeg', '85.jpeg',
+            '86.jpeg', '87.jpeg', '88.png', '89.JPG'
         ];
 
         // Si tu n'as pas encore mis tes photos locales, ce code utilise des images démo :
@@ -227,14 +239,14 @@
 
         // Fond de carte Topographique
         L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
-            maxZoom: 5,
+            maxZoom: 25,
             attribution: 'OpenTopoMap'
         }).addTo(map);
 
         // 2. Gestion de l'arrivée (Zoom depuis l'espace)
         // L'intro dure 4s, on attend la fin pour lancer le zoom
         setTimeout(() => {
-            map.flyTo(targetCoords, 15, {
+            map.flyTo(targetCoords, 13, {
                 animate: true,
                 duration: 9 // Le vol dure 4 secondes
             });
@@ -247,43 +259,92 @@
 
         }, 4000);
 
-        // 3. Fonction Diaporama Rapide
-        function launchSlideshow() {
+        // 3. Audio autoplay handling + preloading function
+        const bgAudio = document.getElementById('bg-audio');
+        let audioAutoplayBlocked = false;
+
+        // Try to play audio on load; if blocked by browser, wait for user gesture.
+        document.addEventListener('DOMContentLoaded', () => {
+            if (bgAudio) {
+                bgAudio.play().catch((err) => {
+                    // Autoplay likely blocked; set flag and wait for user interaction
+                    audioAutoplayBlocked = true;
+                    console.log('Autoplay blocked, will play on user interaction.');
+                });
+            }
+        });
+
+        // Preload images utility: resolves when all loaded or when timeout reached.
+        function preloadImages(urls, timeout = 5000) {
+            return new Promise((resolve) => {
+                if (!Array.isArray(urls) || urls.length === 0) return resolve();
+                let loaded = 0;
+                const total = urls.length;
+                let settled = false;
+
+                const maybeResolve = () => {
+                    if (settled) return;
+                    settled = true;
+                    resolve();
+                };
+
+                urls.forEach(src => {
+                    const img = new Image();
+                    img.onload = img.onerror = () => {
+                        loaded++;
+                        // If all finished, resolve early
+                        if (loaded >= total) maybeResolve();
+                    };
+                    img.src = src;
+                });
+
+                // Fallback timeout so we don't wait forever
+                setTimeout(() => {
+                    maybeResolve();
+                }, timeout);
+            });
+        }
+
+        // 4. Fonction Diaporama Rapide (avec préchargement)
+        async function launchSlideshow() {
             const ui = document.getElementById('ui-layer');
             const overlay = document.getElementById('slideshow-overlay');
             const imgElement = document.getElementById('slideshow-img');
-            
+
             // Cacher le bouton
             ui.style.opacity = '0';
-            
-            // Afficher l'overlay
-            overlay.style.display = 'flex';
-            
-            let index = 0;
 
-            // Fonction pour changer d'image
+            // If audio couldn't autoplay, try to play now (user gesture)
+            if (audioAutoplayBlocked && bgAudio) {
+                bgAudio.play().catch(() => {/* ignore */});
+            }
+
+            // Show overlay immediately and display a short preload message
+            overlay.style.display = 'flex';
+
+            // Build URLs and preload (give up after 6s)
+            const urls = photosToUse.map(p => './pictures/' + p);
+            const preloadTimeout = 6000; // ms
+            try {
+                await preloadImages(urls, preloadTimeout);
+            } catch (e) {
+                console.warn('Preload error', e);
+            }
+
+            // Start slideshow after preload (or timeout)
+            let index = 0;
             function showNextImage() {
                 if (index >= photosToUse.length) {
-                    // Fin du diaporama
                     endSlideshow();
                     return;
                 }
-
-                imgElement.src = "./pictures/" + photosToUse[index];
-                // console.log("Affichage de l'image : " + imgElement.src);
-                
-                // Effet de "reset" de l'animation pour chaque image
+                imgElement.src = './pictures/' + photosToUse[index];
                 imgElement.style.animation = 'none';
                 imgElement.offsetHeight; /* trigger reflow */
                 imgElement.style.animation = 'popIn 0.3s ease-out';
-
                 index++;
-                
-                // Temps d'affichage par photo (800ms = 0.8 seconde)
-                setTimeout(showNextImage, 800); 
+                setTimeout(showNextImage, 800);
             }
-
-            // Lancer la première image
             showNextImage();
         }
 
