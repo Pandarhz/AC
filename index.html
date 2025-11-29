@@ -342,9 +342,9 @@
 
             // Use improved preloader with retries and longer timeout
             preloadImagesRobust(urls, {
-                timeout: 120000,  // 2 minutes total
-                retries: 3,       // Essayer 3 fois par image
-                perImageTimeout: 10000,  // 10 secondes par image
+                timeout: 180000,  // 3 minutes total
+                retries: 5,       // Essayer 5 fois par image
+                perImageTimeout: 15000,  // 15 secondes par image
                 onProgress: (loaded, total, failedList) => {
                     preloadLoaded = loaded;
                     if (progressEl) {
@@ -366,15 +366,25 @@
                     }
                     console.log('✓ Toutes les images prêtes!');
                 } else {
-                    // Some images failed after retries/timeout. Show force button and list failures.
-                    if (progressEl) progressEl.textContent = `Chargement terminé — ${failed.length} image(s) en échec`;
-                    forceBtn.style.display = 'inline-block';
-                    console.warn('Images en échec:', failed);
+                    // Some images failed but proceed anyway (show available images)
+                    photosReady = true;
+                    if (progressEl) progressEl.textContent = `Prêt (${photosToUse.length - failed.length}/${photosToUse.length})`;
+                    if (startBtn) {
+                        startBtn.classList.remove('disabled');
+                        startBtn.removeAttribute('aria-disabled');
+                        startBtn.style.pointerEvents = 'auto';
+                    }
+                    console.warn('Certaines images en échec mais lancement possible:', failed);
                 }
             }).catch((err) => {
-                // Unexpected error: allow forcing but do not enable automatically
-                if (progressEl) progressEl.textContent = 'Erreur pendant le préchargement';
-                forceBtn.style.display = 'inline-block';
+                // Unexpected error: allow launching anyway
+                photosReady = true;
+                if (progressEl) progressEl.textContent = 'Prêt (mode fallback)';
+                if (startBtn) {
+                    startBtn.classList.remove('disabled');
+                    startBtn.removeAttribute('aria-disabled');
+                    startBtn.style.pointerEvents = 'auto';
+                }
                 console.error('Erreur préchargement:', err);
             });
         });
@@ -383,9 +393,9 @@
         // Usage: preloadImagesRobust(urls, { timeout:60000, retries:2, onProgress: (loaded,total,failedList)=>{} })
         // Resolves with { failed: [url,...] }
         function preloadImagesRobust(urls, options = {}) {
-            const overallTimeout = options.timeout || 120000;
-            const retries = (typeof options.retries === 'number') ? options.retries : 0;
-            const perImageTimeout = options.perImageTimeout || 10000;
+            const overallTimeout = options.timeout || 180000;
+            const retries = (typeof options.retries === 'number') ? options.retries : 5;
+            const perImageTimeout = options.perImageTimeout || 15000;
             const onProgress = options.onProgress;
 
             return new Promise((resolve) => {
@@ -484,7 +494,7 @@
                             const r = await attemptPromise();
                             if (r.ok) return res(r);
                             // Wait a bit before retrying
-                            if (a < retries) await new Promise(waitResolve => setTimeout(waitResolve, 300));
+                            if (a < retries) await new Promise(waitResolve => setTimeout(waitResolve, 500));
                         }
                         // All attempts failed
                         return res({ ok: false, src });
@@ -566,14 +576,34 @@
                 }
                 const photoPath = './pictures/' + photosToUse[index];
                 console.log('Affichage image', index + 1, ':', photosToUse[index]);
-                imgElement.src = photoPath;
-                // restart the pop animation by toggling the class
-                imgElement.classList.remove('pop');
-                // force reflow to allow re-adding the class
-                void imgElement.offsetWidth;
-                imgElement.classList.add('pop');
-                index++;
-                setTimeout(showNextImage, displayInterval);
+                
+                // Create a timeout to skip to next image if load takes too long
+                const skipTimeout = setTimeout(() => {
+                    console.warn('Image load timeout:', photosToUse[index], ' - skipping');
+                    index++;
+                    showNextImage();
+                }, 3000);  // 3 seconds to load, else skip
+                
+                // Try loading the image
+                const tempImg = new Image();
+                tempImg.onload = () => {
+                    clearTimeout(skipTimeout);
+                    imgElement.src = photoPath;
+                    // restart the pop animation by toggling the class
+                    imgElement.classList.remove('pop');
+                    // force reflow to allow re-adding the class
+                    void imgElement.offsetWidth;
+                    imgElement.classList.add('pop');
+                    index++;
+                    setTimeout(showNextImage, displayInterval);
+                };
+                tempImg.onerror = () => {
+                    clearTimeout(skipTimeout);
+                    console.warn('Image failed to load:', photosToUse[index], ' - skipping');
+                    index++;
+                    showNextImage();
+                };
+                tempImg.src = photoPath;
             }
             showNextImage();
         }
