@@ -322,17 +322,20 @@
 
             // Use improved preloader with retries and longer timeout
             preloadImagesRobust(urls, {
-                timeout: 60000,
-                retries: 2,
+                timeout: 120000,  // 2 minutes total
+                retries: 3,       // Essayer 3 fois par image
+                perImageTimeout: 10000,  // 10 secondes par image
                 onProgress: (loaded, total, failedList) => {
                     preloadLoaded = loaded;
                     if (progressEl) {
                         if (failedList && failedList.length > 0) progressEl.textContent = `Chargement ${loaded}/${total} (échecs: ${failedList.length})`;
                         else progressEl.textContent = `Chargement ${loaded}/${total}`;
                     }
+                    console.log(`Progression préchargement: ${loaded}/${total}`, failedList);
                 }
             }).then((result) => {
                 const failed = result && result.failed ? result.failed : [];
+                console.log('Préchargement terminé. Images en échec:', failed);
                 if (failed.length === 0) {
                     photosReady = true;
                     if (progressEl) progressEl.textContent = 'Prêt — Lancer';
@@ -341,6 +344,7 @@
                         startBtn.removeAttribute('aria-disabled');
                         startBtn.style.pointerEvents = 'auto';
                     }
+                    console.log('✓ Toutes les images prêtes!');
                 } else {
                     // Some images failed after retries/timeout. Show force button and list failures.
                     if (progressEl) progressEl.textContent = `Chargement terminé — ${failed.length} image(s) en échec`;
@@ -351,16 +355,17 @@
                 // Unexpected error: allow forcing but do not enable automatically
                 if (progressEl) progressEl.textContent = 'Erreur pendant le préchargement';
                 forceBtn.style.display = 'inline-block';
-                console.error(err);
+                console.error('Erreur préchargement:', err);
             });
         });
 
-        // Robust preload: improved version with retries, per-image progress, and overall timeout.
+        // Robust preload: improved version with retries, per-image timeout, and overall timeout.
         // Usage: preloadImagesRobust(urls, { timeout:60000, retries:2, onProgress: (loaded,total,failedList)=>{} })
         // Resolves with { failed: [url,...] }
         function preloadImagesRobust(urls, options = {}) {
-            const timeout = options.timeout || 8000;
+            const overallTimeout = options.timeout || 60000;
             const retries = (typeof options.retries === 'number') ? options.retries : 0;
+            const perImageTimeout = options.perImageTimeout || 8000; // timeout par image
             const onProgress = options.onProgress;
 
             return new Promise((resolve) => {
@@ -369,27 +374,56 @@
                 let finished = 0;
                 let settled = false;
                 const failed = [];
+                const loaded = {}; // Track loaded images in browser cache
 
                 const callProgress = () => {
                     if (onProgress) onProgress(finished, total, failed.slice());
                 };
 
-                // Helper to try loading one image with retries
+                // Helper to try loading one image with retries and per-image timeout
                 const loadOne = (src) => new Promise((res) => {
                     const attemptPromise = () => new Promise((attemptResolve) => {
                         let done = false;
                         const img = new Image();
-                        img.onload = () => { if (done) return; done = true; attemptResolve({ ok: true, src }); };
-                        img.onerror = () => { if (done) return; done = true; attemptResolve({ ok: false, src }); };
-                        try { img.src = src; }
-                        catch (e) { if (!done) { done = true; attemptResolve({ ok: false, src }); } }
+                        
+                        img.onload = () => { 
+                            if (done) return; 
+                            done = true; 
+                            loaded[src] = true; // Mark as loaded in cache
+                            attemptResolve({ ok: true, src }); 
+                        };
+                        
+                        img.onerror = () => { 
+                            if (done) return; 
+                            done = true; 
+                            attemptResolve({ ok: false, src }); 
+                        };
+                        
+                        // Per-image timeout
+                        const imgTimeout = setTimeout(() => {
+                            if (done) return;
+                            done = true;
+                            attemptResolve({ ok: false, src });
+                        }, perImageTimeout);
+                        
+                        try { 
+                            img.src = src; 
+                        }
+                        catch (e) { 
+                            if (!done) { 
+                                done = true; 
+                                clearTimeout(imgTimeout);
+                                attemptResolve({ ok: false, src }); 
+                            } 
+                        }
                     });
 
                     (async () => {
                         for (let a = 0; a <= retries; a++) {
                             const r = await attemptPromise();
                             if (r.ok) return res(r);
-                            // else continue to next attempt
+                            // Wait a bit before retrying
+                            if (a < retries) await new Promise(waitResolve => setTimeout(waitResolve, 500));
                         }
                         // All attempts failed
                         return res({ ok: false, src });
@@ -418,7 +452,7 @@
                     Promise.allSettled(loaders).then(() => {
                         resolve({ failed: failed.slice() });
                     });
-                }, timeout);
+                }, overallTimeout);
 
                 Promise.all(loaders).then(() => {
                     if (settled) return;
@@ -440,7 +474,12 @@
             const overlay = document.getElementById('slideshow-overlay');
             const imgElement = document.getElementById('slideshow-img');
             // If photos are not ready yet, do nothing (button should be disabled)
-            if (!photosReady) return;
+            if (!photosReady) {
+                console.warn('Photos not ready yet, aborting slideshow');
+                return;
+            }
+
+            console.log('Lancement du diaporama avec', photosToUse.length, 'images');
 
             // Cacher le bouton
             ui.style.opacity = '0';
@@ -464,7 +503,9 @@
                     endSlideshow();
                     return;
                 }
-                imgElement.src = './pictures/' + photosToUse[index];
+                const photoPath = './pictures/' + photosToUse[index];
+                console.log('Affichage image', index + 1, ':', photosToUse[index]);
+                imgElement.src = photoPath;
                 // restart the pop animation by toggling the class
                 imgElement.classList.remove('pop');
                 // force reflow to allow re-adding the class
