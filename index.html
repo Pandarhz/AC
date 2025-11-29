@@ -129,6 +129,19 @@
         .start-btn:active {
             transform: scale(0.95);
         }
+        /* Disabled state while images preload */
+        .start-btn.disabled {
+            opacity: 0.6;
+            cursor: default;
+            pointer-events: none;
+            filter: grayscale(30%);
+        }
+        .start-btn .progress {
+            display: block;
+            font-size: 0.8rem;
+            margin-top: 6px;
+            opacity: 0.9;
+        }
 
         /* --- KEYFRAMES --- */
         @keyframes walkAcross {
@@ -175,7 +188,10 @@
 
     <!-- 3. Interface Bouton -->
     <div class="ui-container" id="ui-layer">
-        <a class="start-btn" onclick="launchSlideshow()">Lancer l'exploration</a>
+        <button id="start-btn" class="start-btn disabled" onclick="launchSlideshow()" aria-disabled="true">
+            <span class="label">Lancer l'exploration</span>
+            <span class="progress" id="start-progress">Chargement…</span>
+        </button>
     </div>
 
     <!-- 4. Carte -->
@@ -232,7 +248,7 @@
         // 1. Initialisation Carte (Vue Espace - Zoom Lointain)
         const map = L.map('map', {
             center: [46.2276, 2.2137], // Centre de la France
-            zoom: 5, // Vue de très haut
+            zoom: 1, // Vue de très haut
             zoomControl: false,
             attributionControl: false
         });
@@ -264,18 +280,50 @@
         let audioAutoplayBlocked = false;
 
         // Try to play audio on load; if blocked by browser, wait for user gesture.
+        // Also start preloading photos in background and update the start button progress.
+        let photosReady = false;
+        let preloadLoaded = 0;
+        let preloadTotal = 0;
+
         document.addEventListener('DOMContentLoaded', () => {
+            // attempt audio autoplay
             if (bgAudio) {
                 bgAudio.play().catch((err) => {
-                    // Autoplay likely blocked; set flag and wait for user interaction
                     audioAutoplayBlocked = true;
                     console.log('Autoplay blocked, will play on user interaction.');
                 });
             }
+
+            // start preloading images silently in background
+            const startBtn = document.getElementById('start-btn');
+            const progressEl = document.getElementById('start-progress');
+            const urls = photosToUse.map(p => './pictures/' + p);
+            preloadTotal = urls.length;
+            preloadImagesWithProgress(urls, 12000, (loaded, total) => {
+                preloadLoaded = loaded;
+                if (progressEl) progressEl.textContent = `Chargement ${loaded}/${total}`;
+            }).then(() => {
+                photosReady = true;
+                if (progressEl) progressEl.textContent = 'Prêt — Lancer';
+                if (startBtn) {
+                    startBtn.classList.remove('disabled');
+                    startBtn.removeAttribute('aria-disabled');
+                    startBtn.style.pointerEvents = 'auto';
+                }
+            }).catch(() => {
+                // On error or timeout, still enable the button so user can proceed
+                photosReady = true;
+                if (progressEl) progressEl.textContent = 'Prêt — Lancer';
+                if (startBtn) {
+                    startBtn.classList.remove('disabled');
+                    startBtn.removeAttribute('aria-disabled');
+                    startBtn.style.pointerEvents = 'auto';
+                }
+            });
         });
 
-        // Preload images utility: resolves when all loaded or when timeout reached.
-        function preloadImages(urls, timeout = 5000) {
+        // Preload images with progress callback. Resolves when all finished or when timeout reached.
+        function preloadImagesWithProgress(urls, timeout = 5000, onProgress) {
             return new Promise((resolve) => {
                 if (!Array.isArray(urls) || urls.length === 0) return resolve();
                 let loaded = 0;
@@ -285,16 +333,24 @@
                 const maybeResolve = () => {
                     if (settled) return;
                     settled = true;
+                    if (onProgress) onProgress(total, total);
                     resolve();
                 };
 
                 urls.forEach(src => {
                     const img = new Image();
-                    img.onload = img.onerror = () => {
+                    img.onload = () => {
                         loaded++;
-                        // If all finished, resolve early
+                        if (onProgress) onProgress(loaded, total);
                         if (loaded >= total) maybeResolve();
                     };
+                    img.onerror = () => {
+                        // still count errors as "loaded" to avoid stalling
+                        loaded++;
+                        if (onProgress) onProgress(loaded, total);
+                        if (loaded >= total) maybeResolve();
+                    };
+                    // start loading
                     img.src = src;
                 });
 
@@ -310,6 +366,8 @@
             const ui = document.getElementById('ui-layer');
             const overlay = document.getElementById('slideshow-overlay');
             const imgElement = document.getElementById('slideshow-img');
+            // If photos are not ready yet, do nothing (button should be disabled)
+            if (!photosReady) return;
 
             // Cacher le bouton
             ui.style.opacity = '0';
@@ -319,19 +377,10 @@
                 bgAudio.play().catch(() => {/* ignore */});
             }
 
-            // Show overlay immediately and display a short preload message
+            // Show overlay immediately
             overlay.style.display = 'flex';
 
-            // Build URLs and preload (give up after 6s)
-            const urls = photosToUse.map(p => './pictures/' + p);
-            const preloadTimeout = 6000; // ms
-            try {
-                await preloadImages(urls, preloadTimeout);
-            } catch (e) {
-                console.warn('Preload error', e);
-            }
-
-            // Start slideshow after preload (or timeout)
+            // Start slideshow (images should be cached from preload)
             let index = 0;
             function showNextImage() {
                 if (index >= photosToUse.length) {
