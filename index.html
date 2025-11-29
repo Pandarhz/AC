@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Souvenirs des Écrins</title>
+    <title>Anniversaire aux Écrins</title>
     
     <!-- Leaflet CSS -->
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
@@ -50,7 +50,7 @@
             left: -20%; /* Départ à gauche hors écran */
             display: flex;
             gap: 20px;
-            animation: walkAcross 4s linear forwards;
+            animation: walkAcross 7s linear forwards;
         }
 
         .walker {
@@ -338,7 +338,7 @@
                 console.log('Préchargement terminé. Images en échec:', failed);
                 if (failed.length === 0) {
                     photosReady = true;
-                    if (progressEl) progressEl.textContent = 'Prêt — Lancer';
+                    if (progressEl) progressEl.textContent = 'Prêt';
                     if (startBtn) {
                         startBtn.classList.remove('disabled');
                         startBtn.removeAttribute('aria-disabled');
