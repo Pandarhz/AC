@@ -359,13 +359,13 @@
             });
         });
 
-        // Robust preload: improved version with retries, per-image timeout, and overall timeout.
+        // Robust preload: improved version with fetch+blob (handles EXIF), retries, per-image timeout, and overall timeout.
         // Usage: preloadImagesRobust(urls, { timeout:60000, retries:2, onProgress: (loaded,total,failedList)=>{} })
         // Resolves with { failed: [url,...] }
         function preloadImagesRobust(urls, options = {}) {
-            const overallTimeout = options.timeout || 60000;
+            const overallTimeout = options.timeout || 120000;
             const retries = (typeof options.retries === 'number') ? options.retries : 0;
-            const perImageTimeout = options.perImageTimeout || 8000; // timeout par image
+            const perImageTimeout = options.perImageTimeout || 10000;
             const onProgress = options.onProgress;
 
             return new Promise((resolve) => {
@@ -374,47 +374,88 @@
                 let finished = 0;
                 let settled = false;
                 const failed = [];
-                const loaded = {}; // Track loaded images in browser cache
+                const loaded = {};
 
                 const callProgress = () => {
                     if (onProgress) onProgress(finished, total, failed.slice());
                 };
 
                 // Helper to try loading one image with retries and per-image timeout
+                // Uses fetch+blob+createObjectURL to bypass EXIF issues
                 const loadOne = (src) => new Promise((res) => {
                     const attemptPromise = () => new Promise((attemptResolve) => {
                         let done = false;
-                        const img = new Image();
-                        
-                        img.onload = () => { 
-                            if (done) return; 
-                            done = true; 
-                            loaded[src] = true; // Mark as loaded in cache
-                            attemptResolve({ ok: true, src }); 
-                        };
-                        
-                        img.onerror = () => { 
-                            if (done) return; 
-                            done = true; 
-                            attemptResolve({ ok: false, src }); 
-                        };
-                        
-                        // Per-image timeout
+
+                        // Timeout handler
                         const imgTimeout = setTimeout(() => {
                             if (done) return;
                             done = true;
                             attemptResolve({ ok: false, src });
                         }, perImageTimeout);
-                        
-                        try { 
-                            img.src = src; 
-                        }
-                        catch (e) { 
-                            if (!done) { 
+
+                        // Try fetch + blob approach first (better for EXIF)
+                        if (window.fetch) {
+                            fetch(src, { method: 'GET' })
+                                .then(resp => {
+                                    if (!done && resp.ok) {
+                                        return resp.blob().then(blob => {
+                                            const blobUrl = URL.createObjectURL(blob);
+                                            // Verify by loading with Image to confirm it's valid
+                                            const img = new Image();
+                                            img.onload = () => {
+                                                if (done) { URL.revokeObjectURL(blobUrl); return; }
+                                                done = true;
+                                                clearTimeout(imgTimeout);
+                                                loaded[src] = true;
+                                                // Keep the blob URL in memory (or revoke if we don't need it)
+                                                URL.revokeObjectURL(blobUrl);
+                                                attemptResolve({ ok: true, src });
+                                            };
+                                            img.onerror = () => {
+                                                if (done) { URL.revokeObjectURL(blobUrl); return; }
+                                                done = true;
+                                                clearTimeout(imgTimeout);
+                                                URL.revokeObjectURL(blobUrl);
+                                                attemptResolve({ ok: false, src });
+                                            };
+                                            img.src = blobUrl;
+                                        });
+                                    } else {
+                                        throw new Error('Resp not ok');
+                                    }
+                                })
+                                .catch(err => {
+                                    if (done) return;
+                                    done = true;
+                                    clearTimeout(imgTimeout);
+                                    attemptResolve({ ok: false, src });
+                                });
+                        } else {
+                            // Fallback to Image() if fetch not available
+                            const img = new Image();
+                            img.onload = () => { 
+                                if (done) return; 
+                                done = true; 
+                                clearTimeout(imgTimeout);
+                                loaded[src] = true;
+                                attemptResolve({ ok: true, src }); 
+                            };
+                            img.onerror = () => { 
+                                if (done) return; 
                                 done = true; 
                                 clearTimeout(imgTimeout);
                                 attemptResolve({ ok: false, src }); 
-                            } 
+                            };
+                            try { 
+                                img.src = src; 
+                            }
+                            catch (e) { 
+                                if (!done) { 
+                                    done = true; 
+                                    clearTimeout(imgTimeout);
+                                    attemptResolve({ ok: false, src }); 
+                                } 
+                            }
                         }
                     });
 
@@ -423,7 +464,7 @@
                             const r = await attemptPromise();
                             if (r.ok) return res(r);
                             // Wait a bit before retrying
-                            if (a < retries) await new Promise(waitResolve => setTimeout(waitResolve, 500));
+                            if (a < retries) await new Promise(waitResolve => setTimeout(waitResolve, 300));
                         }
                         // All attempts failed
                         return res({ ok: false, src });
