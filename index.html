@@ -172,6 +172,20 @@
             100% { transform: scale(1); opacity: 1; }
         }
 
+        @keyframes orbit {
+            0% { transform: rotate(0deg) translateX(120px) rotate(0deg); }
+            100% { transform: rotate(360deg) translateX(120px) rotate(-360deg); }
+        }
+
+        .orbiting-image {
+            position: absolute;
+            width: 80px;
+            height: 80px;
+            border-radius: 50%;
+            animation: orbit 8s linear infinite;
+            animation-delay: 0s;
+        }
+
     </style>
 </head>
 <body>
@@ -194,7 +208,10 @@
     <!-- 2b. Celebration overlay (confetti + message) -->
     <div id="celebrate-overlay" style="display:none; position:fixed; inset:0; z-index:4000; align-items:center; justify-content:center;">
         <canvas id="confetti-canvas" style="position:absolute; inset:0; width:100%; height:100%;"></canvas>
-        <div id="celebrate-text" style="position:relative; z-index:4001; color:#fff; font-size:4rem; font-weight:700; text-align:center; text-shadow:0 4px 20px rgba(0,0,0,0.7); font-family:'Chewy', cursive; letter-spacing: 2px;">Joyeux Anniversaire !</div>
+        <div style="position:relative; z-index:4001; display:flex; align-items:center; justify-content:center; width:300px; height:300px;">
+            <img id="orbit-img" class="orbiting-image" src="./pictures/31_cropped.png" alt="Celebration" style="display:none;">
+            <div id="celebrate-text" style="position:relative; z-index:4002; color:#fff; font-size:4rem; font-weight:700; text-align:center; text-shadow:0 4px 20px rgba(0,0,0,0.7); font-family:'Chewy', cursive; letter-spacing: 2px;">Joyeux Anniversaire !</div>
+        </div>
     </div>
 
     <!-- 3. Interface Bouton -->
@@ -223,7 +240,8 @@
             '6.jpg', '7.JPG', '8.JPG', '9.JPG', '10.JPG',
             '11.JPG', '12.JPG', '13.JPG', '14.JPG', '15.jpg',
             '16.jpg', '17.jpg', '18.jpg', '19.JPG', '20.jpg',
-            '21.JPG', '22.jpeg', '23.JPG', '24.JPG', '25.JPG'
+            '21.JPG', '22.jpeg', '23.JPG', '24.JPG', '25.JPG',
+            '31_cropped.png'
         ];
 
         // Si tu n'as pas encore mis tes photos locales, ce code utilise des images démo :
@@ -562,6 +580,7 @@
         function showCelebration(duration = 6000) {
             const celebrate = document.getElementById('celebrate-overlay');
             const canvas = document.getElementById('confetti-canvas');
+            const orbitImg = document.getElementById('orbit-img');
             if (!celebrate || !canvas) return;
             celebrate.style.display = 'flex';
             canvas.width = window.innerWidth * devicePixelRatio;
@@ -569,6 +588,9 @@
             canvas.style.width = window.innerWidth + 'px';
             canvas.style.height = window.innerHeight + 'px';
             const ctx = canvas.getContext('2d');
+
+            // Show the orbiting image
+            if (orbitImg) orbitImg.style.display = 'block';
 
             // simple confetti particles
             const colors = ['#ff5e5e','#ffd166','#06d6a0','#4dabf7','#c77dff'];
@@ -612,7 +634,11 @@
                     // stop and hide after a little fade
                     celebrate.style.transition = 'opacity 700ms';
                     celebrate.style.opacity = '0';
-                    setTimeout(() => { celebrate.style.display='none'; celebrate.style.opacity='1'; }, 800);
+                    setTimeout(() => { 
+                        celebrate.style.display='none'; 
+                        celebrate.style.opacity='1'; 
+                        if (orbitImg) orbitImg.style.display = 'none';
+                    }, 800);
                 }
             }
             requestAnimationFrame(frame);
