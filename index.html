@@ -84,7 +84,12 @@
             max-width: 100%;
             max-height: 100%;
             object-fit: contain;
-            animation: popIn 0.3s ease-out; /* Effet d'apparition sec */
+        }
+
+        /* pop animation applied by toggling the .pop class from JS; duration is controlled by --pop-duration */
+        :root { --pop-duration: 800ms; }
+        #slideshow-img.pop {
+            animation: popIn var(--pop-duration) ease-out both;
         }
 
         /* --- 3. CARTE ET INTERFACE --- */
@@ -184,6 +189,12 @@
     <!-- 2. Diaporama Rapide -->
     <div id="slideshow-overlay">
         <img id="slideshow-img" src="" alt="Souvenir">
+    </div>
+
+    <!-- 2b. Celebration overlay (confetti + message) -->
+    <div id="celebrate-overlay" style="display:none; position:fixed; inset:0; z-index:4000; align-items:center; justify-content:center;">
+        <canvas id="confetti-canvas" style="position:absolute; inset:0; width:100%; height:100%;"></canvas>
+        <div id="celebrate-text" style="position:relative; z-index:4001; color:#fff; font-size:4rem; font-weight:800; text-align:center; text-shadow:0 4px 20px rgba(0,0,0,0.7);">Joyeux Anniversaire !</div>
     </div>
 
     <!-- 3. Interface Bouton -->
@@ -299,7 +310,7 @@
             const progressEl = document.getElementById('start-progress');
             const urls = photosToUse.map(p => './pictures/' + p);
             preloadTotal = urls.length;
-            preloadImagesWithProgress(urls, 12000, (loaded, total) => {
+            preloadImagesRobust(urls, 12000, (loaded, total) => {
                 preloadLoaded = loaded;
                 if (progressEl) progressEl.textContent = `Chargement ${loaded}/${total}`;
             }).then(() => {
@@ -322,41 +333,56 @@
             });
         });
 
-        // Preload images with progress callback. Resolves when all finished or when timeout reached.
-        function preloadImagesWithProgress(urls, timeout = 5000, onProgress) {
+        // Robust preload: try Image() and also fetch (where supported) to ensure bytes downloaded.
+        // Calls onProgress(loaded, total) as items complete. Resolves when all done or timeout.
+        function preloadImagesRobust(urls, timeout = 8000, onProgress) {
             return new Promise((resolve) => {
                 if (!Array.isArray(urls) || urls.length === 0) return resolve();
-                let loaded = 0;
                 const total = urls.length;
+                let loaded = 0;
                 let settled = false;
 
-                const maybeResolve = () => {
+                const markLoaded = () => {
+                    loaded++;
+                    if (onProgress) onProgress(loaded, total);
+                    if (loaded >= total) finish();
+                };
+
+                const finish = () => {
                     if (settled) return;
                     settled = true;
-                    if (onProgress) onProgress(total, total);
                     resolve();
                 };
 
                 urls.forEach(src => {
-                    const img = new Image();
-                    img.onload = () => {
-                        loaded++;
-                        if (onProgress) onProgress(loaded, total);
-                        if (loaded >= total) maybeResolve();
-                    };
-                    img.onerror = () => {
-                        // still count errors as "loaded" to avoid stalling
-                        loaded++;
-                        if (onProgress) onProgress(loaded, total);
-                        if (loaded >= total) maybeResolve();
-                    };
-                    // start loading
-                    img.src = src;
+                    let done = false;
+
+                    // 1) Try Image() as primary approach
+                    try {
+                        const img = new Image();
+                        img.onload = () => { if (!done) { done = true; markLoaded(); } };
+                        img.onerror = () => { if (!done) { done = true; markLoaded(); } };
+                        img.src = src;
+                    } catch (e) {
+                        // swallow
+                    }
+
+                    // 2) Try fetch to ensure bytes downloaded (works when served via http/https)
+                    if (window.fetch) {
+                        fetch(src, { method: 'GET' }).then(resp => {
+                            if (!done) {
+                                // read body to ensure download
+                                return resp.blob().then(() => { if (!done) { done = true; markLoaded(); } }).catch(() => { if (!done) { done = true; markLoaded(); } });
+                            }
+                        }).catch(() => {
+                            if (!done) { done = true; markLoaded(); }
+                        });
+                    }
                 });
 
-                // Fallback timeout so we don't wait forever
+                // Timeout fallback
                 setTimeout(() => {
-                    maybeResolve();
+                    finish();
                 }, timeout);
             });
         }
@@ -381,6 +407,10 @@
             overlay.style.display = 'flex';
 
             // Start slideshow (images should be cached from preload)
+            const displayInterval = 800; // ms between images
+            // ensure CSS variable matches the display interval for rhythm
+            document.documentElement.style.setProperty('--pop-duration', displayInterval + 'ms');
+
             let index = 0;
             function showNextImage() {
                 if (index >= photosToUse.length) {
@@ -388,21 +418,86 @@
                     return;
                 }
                 imgElement.src = './pictures/' + photosToUse[index];
-                imgElement.style.animation = 'none';
-                imgElement.offsetHeight; /* trigger reflow */
-                imgElement.style.animation = 'popIn 0.3s ease-out';
+                // restart the pop animation by toggling the class
+                imgElement.classList.remove('pop');
+                // force reflow to allow re-adding the class
+                void imgElement.offsetWidth;
+                imgElement.classList.add('pop');
                 index++;
-                setTimeout(showNextImage, 800);
+                setTimeout(showNextImage, displayInterval);
             }
             showNextImage();
+        }
+
+        // Show celebration overlay with confetti and message, then restore UI
+        function showCelebration(duration = 6000) {
+            const celebrate = document.getElementById('celebrate-overlay');
+            const canvas = document.getElementById('confetti-canvas');
+            if (!celebrate || !canvas) return;
+            celebrate.style.display = 'flex';
+            canvas.width = window.innerWidth * devicePixelRatio;
+            canvas.height = window.innerHeight * devicePixelRatio;
+            canvas.style.width = window.innerWidth + 'px';
+            canvas.style.height = window.innerHeight + 'px';
+            const ctx = canvas.getContext('2d');
+
+            // simple confetti particles
+            const colors = ['#ff5e5e','#ffd166','#06d6a0','#4dabf7','#c77dff'];
+            const particles = [];
+            const count = 200;
+            for (let i=0;i<count;i++) {
+                particles.push({
+                    x: Math.random()*canvas.width,
+                    y: Math.random()*-canvas.height,
+                    vx: (Math.random()-0.5)*6,
+                    vy: 2 + Math.random()*6,
+                    size: 4 + Math.random()*8,
+                    color: colors[Math.floor(Math.random()*colors.length)],
+                    rot: Math.random()*360,
+                    rotSpeed: (Math.random()-0.5)*10
+                });
+            }
+
+            let start = null;
+            function frame(ts) {
+                if (!start) start = ts;
+                const elapsed = ts - start;
+                ctx.clearRect(0,0,canvas.width,canvas.height);
+                ctx.save();
+                ctx.scale(devicePixelRatio, devicePixelRatio);
+                for (const p of particles) {
+                    p.x += p.vx;
+                    p.y += p.vy;
+                    p.vy += 0.05; // gravity
+                    p.rot += p.rotSpeed;
+                    ctx.save();
+                    ctx.translate(p.x/devicePixelRatio, p.y/devicePixelRatio);
+                    ctx.rotate(p.rot*Math.PI/180);
+                    ctx.fillStyle = p.color;
+                    ctx.fillRect(-p.size/2, -p.size/2, p.size, p.size*0.6);
+                    ctx.restore();
+                }
+                ctx.restore();
+                if (elapsed < duration) requestAnimationFrame(frame);
+                else {
+                    // stop and hide after a little fade
+                    celebrate.style.transition = 'opacity 700ms';
+                    celebrate.style.opacity = '0';
+                    setTimeout(() => { celebrate.style.display='none'; celebrate.style.opacity='1'; }, 800);
+                }
+            }
+            requestAnimationFrame(frame);
         }
 
         function endSlideshow() {
             const overlay = document.getElementById('slideshow-overlay');
             overlay.style.display = 'none';
-            
-            // Réactiver les contrôles de zoom pour l'utilisateur
-            L.control.zoom({ position: 'bottomright' }).addTo(map);
+            // show celebration
+            showCelebration(6000);
+            // Réactiver les contrôles de zoom pour l'utilisateur (after celebration)
+            setTimeout(() => {
+                L.control.zoom({ position: 'bottomright' }).addTo(map);
+            }, 6500);
         }
 
     </script>
