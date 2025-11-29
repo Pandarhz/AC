@@ -297,80 +297,140 @@
             const progressEl = document.getElementById('start-progress');
             const urls = photosToUse.map(p => './pictures/' + p);
             preloadTotal = urls.length;
-            preloadImagesRobust(urls, 12000, (loaded, total) => {
-                preloadLoaded = loaded;
-                if (progressEl) progressEl.textContent = `Chargement ${loaded}/${total}`;
-            }).then(() => {
-                photosReady = true;
-                if (progressEl) progressEl.textContent = 'Prêt — Lancer';
-                if (startBtn) {
+
+            // create a small force-launch control (hidden by default)
+            let forceBtn = document.getElementById('force-btn');
+            if (!forceBtn) {
+                forceBtn = document.createElement('button');
+                forceBtn.id = 'force-btn';
+                forceBtn.textContent = 'Forcer le lancement';
+                forceBtn.style.marginLeft = '12px';
+                forceBtn.className = 'start-btn';
+                forceBtn.style.padding = '8px 14px';
+                forceBtn.style.fontSize = '0.8rem';
+                forceBtn.style.borderRadius = '20px';
+                forceBtn.style.display = 'none';
+                forceBtn.onclick = () => {
+                    photosReady = true;
                     startBtn.classList.remove('disabled');
                     startBtn.removeAttribute('aria-disabled');
                     startBtn.style.pointerEvents = 'auto';
+                    forceBtn.style.display = 'none';
+                };
+                startBtn.parentNode.appendChild(forceBtn);
+            }
+
+            // Use improved preloader with retries and longer timeout
+            preloadImagesRobust(urls, {
+                timeout: 60000,
+                retries: 2,
+                onProgress: (loaded, total, failedList) => {
+                    preloadLoaded = loaded;
+                    if (progressEl) {
+                        if (failedList && failedList.length > 0) progressEl.textContent = `Chargement ${loaded}/${total} (échecs: ${failedList.length})`;
+                        else progressEl.textContent = `Chargement ${loaded}/${total}`;
+                    }
                 }
-            }).catch(() => {
-                // On error or timeout, still enable the button so user can proceed
-                photosReady = true;
-                if (progressEl) progressEl.textContent = 'Prêt — Lancer';
-                if (startBtn) {
-                    startBtn.classList.remove('disabled');
-                    startBtn.removeAttribute('aria-disabled');
-                    startBtn.style.pointerEvents = 'auto';
+            }).then((result) => {
+                const failed = result && result.failed ? result.failed : [];
+                if (failed.length === 0) {
+                    photosReady = true;
+                    if (progressEl) progressEl.textContent = 'Prêt — Lancer';
+                    if (startBtn) {
+                        startBtn.classList.remove('disabled');
+                        startBtn.removeAttribute('aria-disabled');
+                        startBtn.style.pointerEvents = 'auto';
+                    }
+                } else {
+                    // Some images failed after retries/timeout. Show force button and list failures.
+                    if (progressEl) progressEl.textContent = `Chargement terminé — ${failed.length} image(s) en échec`;
+                    forceBtn.style.display = 'inline-block';
+                    console.warn('Images en échec:', failed);
                 }
+            }).catch((err) => {
+                // Unexpected error: allow forcing but do not enable automatically
+                if (progressEl) progressEl.textContent = 'Erreur pendant le préchargement';
+                forceBtn.style.display = 'inline-block';
+                console.error(err);
             });
         });
 
-        // Robust preload: try Image() and also fetch (where supported) to ensure bytes downloaded.
-        // Calls onProgress(loaded, total) as items complete. Resolves when all done or timeout.
-        function preloadImagesRobust(urls, timeout = 8000, onProgress) {
+        // Robust preload: improved version with retries, per-image progress, and overall timeout.
+        // Usage: preloadImagesRobust(urls, { timeout:60000, retries:2, onProgress: (loaded,total,failedList)=>{} })
+        // Resolves with { failed: [url,...] }
+        function preloadImagesRobust(urls, options = {}) {
+            const timeout = options.timeout || 8000;
+            const retries = (typeof options.retries === 'number') ? options.retries : 0;
+            const onProgress = options.onProgress;
+
             return new Promise((resolve) => {
-                if (!Array.isArray(urls) || urls.length === 0) return resolve();
+                if (!Array.isArray(urls) || urls.length === 0) return resolve({ failed: [] });
                 const total = urls.length;
-                let loaded = 0;
+                let finished = 0;
                 let settled = false;
+                const failed = [];
 
-                const markLoaded = () => {
-                    loaded++;
-                    if (onProgress) onProgress(loaded, total);
-                    if (loaded >= total) finish();
+                const callProgress = () => {
+                    if (onProgress) onProgress(finished, total, failed.slice());
                 };
 
-                const finish = () => {
-                    if (settled) return;
-                    settled = true;
-                    resolve();
-                };
-
-                urls.forEach(src => {
-                    let done = false;
-
-                    // 1) Try Image() as primary approach
-                    try {
+                // Helper to try loading one image with retries
+                const loadOne = (src) => new Promise((res) => {
+                    const attemptPromise = () => new Promise((attemptResolve) => {
+                        let done = false;
                         const img = new Image();
-                        img.onload = () => { if (!done) { done = true; markLoaded(); } };
-                        img.onerror = () => { if (!done) { done = true; markLoaded(); } };
-                        img.src = src;
-                    } catch (e) {
-                        // swallow
-                    }
+                        img.onload = () => { if (done) return; done = true; attemptResolve({ ok: true, src }); };
+                        img.onerror = () => { if (done) return; done = true; attemptResolve({ ok: false, src }); };
+                        try { img.src = src; }
+                        catch (e) { if (!done) { done = true; attemptResolve({ ok: false, src }); } }
+                    });
 
-                    // 2) Try fetch to ensure bytes downloaded (works when served via http/https)
-                    if (window.fetch) {
-                        fetch(src, { method: 'GET' }).then(resp => {
-                            if (!done) {
-                                // read body to ensure download
-                                return resp.blob().then(() => { if (!done) { done = true; markLoaded(); } }).catch(() => { if (!done) { done = true; markLoaded(); } });
-                            }
-                        }).catch(() => {
-                            if (!done) { done = true; markLoaded(); }
-                        });
-                    }
+                    (async () => {
+                        for (let a = 0; a <= retries; a++) {
+                            const r = await attemptPromise();
+                            if (r.ok) return res(r);
+                            // else continue to next attempt
+                        }
+                        // All attempts failed
+                        return res({ ok: false, src });
+                    })();
                 });
 
-                // Timeout fallback
-                setTimeout(() => {
-                    finish();
+                // Kick off all loads in parallel and update progress as they finish
+                const loaders = urls.map(src => {
+                    return loadOne(src).then(r => {
+                        finished++;
+                        if (!r.ok) failed.push(r.src);
+                        callProgress();
+                        return r;
+                    }).catch(() => {
+                        finished++;
+                        failed.push(src);
+                        callProgress();
+                        return { ok: false, src };
+                    });
+                });
+
+                // Overall timeout: if reached, wait for current settled loaders and resolve
+                const timeoutId = setTimeout(() => {
+                    if (settled) return;
+                    settled = true;
+                    Promise.allSettled(loaders).then(() => {
+                        resolve({ failed: failed.slice() });
+                    });
                 }, timeout);
+
+                Promise.all(loaders).then(() => {
+                    if (settled) return;
+                    settled = true;
+                    clearTimeout(timeoutId);
+                    resolve({ failed: failed.slice() });
+                }).catch(() => {
+                    if (settled) return;
+                    settled = true;
+                    clearTimeout(timeoutId);
+                    resolve({ failed: failed.slice() });
+                });
             });
         }
 
