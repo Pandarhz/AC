@@ -173,15 +173,16 @@
         }
 
         @keyframes orbit {
-            0% { transform: rotate(0deg) translateX(120px) rotate(0deg); }
-            100% { transform: rotate(360deg) translateX(120px) rotate(-360deg); }
+            0% { transform: rotate(0deg) translateX(150px) rotate(0deg); }
+            100% { transform: rotate(360deg) translateX(150px) rotate(-360deg); }
         }
 
         .orbiting-image {
             position: absolute;
-            width: 80px;
-            height: 80px;
+            width: 150px;
+            height: 150px;
             border-radius: 50%;
+            object-fit: cover;
             animation: orbit 8s linear infinite;
             animation-delay: 0s;
         }
@@ -610,36 +611,38 @@
             }
 
             let start = null;
+            let confettiDone = false;
+            
             function frame(ts) {
                 if (!start) start = ts;
                 const elapsed = ts - start;
                 ctx.clearRect(0,0,canvas.width,canvas.height);
                 ctx.save();
                 ctx.scale(devicePixelRatio, devicePixelRatio);
-                for (const p of particles) {
-                    p.x += p.vx;
-                    p.y += p.vy;
-                    p.vy += 0.05; // gravity
-                    p.rot += p.rotSpeed;
-                    ctx.save();
-                    ctx.translate(p.x/devicePixelRatio, p.y/devicePixelRatio);
-                    ctx.rotate(p.rot*Math.PI/180);
-                    ctx.fillStyle = p.color;
-                    ctx.fillRect(-p.size/2, -p.size/2, p.size, p.size*0.6);
-                    ctx.restore();
+                
+                // Draw confetti only for first duration
+                if (!confettiDone) {
+                    for (const p of particles) {
+                        p.x += p.vx;
+                        p.y += p.vy;
+                        p.vy += 0.05; // gravity
+                        p.rot += p.rotSpeed;
+                        ctx.save();
+                        ctx.translate(p.x/devicePixelRatio, p.y/devicePixelRatio);
+                        ctx.rotate(p.rot*Math.PI/180);
+                        ctx.fillStyle = p.color;
+                        ctx.fillRect(-p.size/2, -p.size/2, p.size, p.size*0.6);
+                        ctx.restore();
+                    }
+                    if (elapsed >= duration) {
+                        confettiDone = true;
+                        ctx.clearRect(0,0,canvas.width,canvas.height);
+                    }
                 }
                 ctx.restore();
-                if (elapsed < duration) requestAnimationFrame(frame);
-                else {
-                    // stop and hide after a little fade
-                    celebrate.style.transition = 'opacity 700ms';
-                    celebrate.style.opacity = '0';
-                    setTimeout(() => { 
-                        celebrate.style.display='none'; 
-                        celebrate.style.opacity='1'; 
-                        if (orbitImg) orbitImg.style.display = 'none';
-                    }, 800);
-                }
+                
+                // Continue animation loop forever (image keeps orbiting)
+                requestAnimationFrame(frame);
             }
             requestAnimationFrame(frame);
         }
